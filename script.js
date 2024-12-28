@@ -1,40 +1,131 @@
-// Global variables
-let data = [];
-let filteredData = [];
-const charts = {};
-const margin = { top: 40, right: 40, bottom: 60, left: 60 };
+// Configuration
+const config = {
+    margin: { top: 40, right: 40, bottom: 60, left: 60 },
+    colors: {
+        // Main score colors - from low to high performance
+        scores: {
+            'Score primaire': '#2166ac',      // Deep blue
+            'Score collégial': '#67a9cf',     // Medium blue
+            'Score actuel': '#d1e5f0',        // Light blue
+            'score en mathématiques': '#f7f7f7', // White-ish
+            'score en langue arabe': '#fddbc7',   // Light orange
+            'score en première langue': '#ef8a62'  // Medium orange
+        },
+        // School type colors
+        schoolTypes: {
+            'Public': '#1a9850',   // Green for public schools
+            'Privé': '#7570b3'     // Purple for private schools
+        },
+        // Resource colors
+        resources: {
+            'Electricité': '#66c2a5', // Teal
+            'Eau': '#3288bd',         // Blue
+            'pc': '#5e4fa2',          // Purple
+            'Livres': '#66a61e'       // Green
+        },
+        // Zone colors - using a categorical color scheme
+        zones: [
+            '#8dd3c7', '#ffffb3', '#bebada', 
+            '#fb8072', '#80b1d3', '#fdb462'
+        ],
+        // Correlation colors
+        correlation: {
+            positive: '#d73027',    // Red for positive correlation
+            neutral: '#f7f7f7',     // White for no correlation
+            negative: '#313695'     // Blue for negative correlation
+        },
+        // General purpose colors
+        grid: '#ddd',
+        text: '#333',
+        highlight: '#000',
+        background: '#fff'
+    },
+    scoreTypes: ['Score primaire', 'Score collégial', 'Score actuel']
+};
 
-// Initialize the dashboard
-function initializeDashboard() {
-    // Load data
-    d3.csv('generated_data.csv').then(loadedData => {
-        data = loadedData;
-        processData();
-        filteredData = [...data];
-        setupFilters();
-        createVisualizations();
-    }).catch(error => {
-        console.error('Error loading data:', error);
-    });
+// Data management
+class DataManager {
+    constructor() {
+        this.data = [];
+        this.filteredData = [];
+    }
+
+    async loadData() {
+        try {
+            const rawData = await d3.csv('base de donne.csv');
+            this.data = this.processData(rawData);
+            this.filteredData = [...this.data];
+            return true;
+        } catch (error) {
+            console.error('Error loading data:', error);
+            return false;
+        }
+    }
+
+    processData(rawData) {
+        return rawData.map(d => ({
+            ...d,
+            'Score primaire': +d['Score primaire'],
+            'Score collégial': +d['Score collégial'] / 2,
+            'Score actuel': +d['Score actuel'] / 2,
+            'score en mathématiques': +d['score en mathématiques'] / 2,
+            'score en langue arabe': +d['score en langue arabe'] / 2,
+            'score en première langue': +d['score en première langue'] / 2
+        }));
+    }
+
+    getUniqueValues(field) {
+        return [...new Set(this.data.map(d => d[field]))];
+    }
+
+    applyFilters(filters) {
+        this.filteredData = this.data.filter(d => {
+            return (filters.zone === 'all' || d.Zone === filters.zone) &&
+                   (filters.schoolType === 'all' || d['Public / Privé'] === filters.schoolType) &&
+                   (filters.gender === 'all' || d.Sexe === filters.gender);
+        });
+        updateVisualizations();
+    }
 }
 
-// Data processing
-function processData() {
-    data.forEach(d => {
-        // Convert and adjust scores
-        d['Score primaire'] = +d['Score primaire'];
-        d['Score collégial'] = +d['Score collégial'] / 2; // Adjust to 10-point scale
-        d['Score actuel'] = +d['Score actuel'] / 2; // Adjust to 10-point scale
-        d['score en mathématiques'] = +d['score en mathématiques'] / 2;
-        d['score en langue arabe'] = +d['score en langue arabe'] / 2;
-        d['score en première langue'] = +d['score en première langue'] / 2;
-    });
+// Utility functions
+function calculateCorrelation(x, y) {
+    const mean = arr => arr.reduce((a, b) => a + b) / arr.length;
+    const xMean = mean(x), yMean = mean(y);
+    
+    const numerator = x.reduce((sum, xi, i) => 
+        sum + (xi - xMean) * (y[i] - yMean), 0);
+    const denominator = Math.sqrt(
+        x.reduce((sum, xi) => sum + Math.pow(xi - xMean, 2), 0) *
+        y.reduce((sum, yi) => sum + Math.pow(yi - yMean, 2), 0)
+    );
+    
+    return numerator / denominator;
+}
+
+function softmax(arr) {
+    const expValues = arr.map(val => Math.exp(val));
+    const sum = expValues.reduce((a, b) => a + b);
+    return expValues.map(val => val / sum);
+}
+
+// Initialize the dashboard
+const dataManager = new DataManager();
+
+async function initializeDashboard() {
+    if (await dataManager.loadData()) {
+        setupFilters();
+        createVisualizations();
+    } else {
+        d3.select('#error-message')
+            .text('Error loading data. Please try refreshing the page.');
+    }
 }
 
 // Filter setup
 function setupFilters() {
     // Zone filter
-    const zones = [...new Set(data.map(d => d.Zone))];
+    const zones = dataManager.getUniqueValues('Zone');
     d3.select('#zoneFilter')
         .selectAll('option')
         .data(['all', ...zones])
@@ -44,7 +135,7 @@ function setupFilters() {
         .attr('value', d => d);
 
     // School type filter
-    const schoolTypes = [...new Set(data.map(d => d['Public / Privé']))];
+    const schoolTypes = dataManager.getUniqueValues('Public / Privé');
     d3.select('#schoolTypeFilter')
         .selectAll('option')
         .data(['all', ...schoolTypes])
@@ -54,7 +145,7 @@ function setupFilters() {
         .attr('value', d => d);
 
     // Gender filter
-    const genders = [...new Set(data.map(d => d.Sexe))];
+    const genders = dataManager.getUniqueValues('Sexe');
     d3.select('#genderFilter')
         .selectAll('option')
         .data(['all', ...genders])
@@ -66,6 +157,35 @@ function setupFilters() {
     // Add event listeners
     d3.selectAll('select').on('change', updateVisualizations);
     d3.select('#resetFilters').on('click', resetFilters);
+}
+
+function updateVisualizations() {
+    const selectedZone = d3.select('#zoneFilter').property('value');
+    const selectedSchoolType = d3.select('#schoolTypeFilter').property('value');
+    const selectedGender = d3.select('#genderFilter').property('value');
+
+    // Update filtered data
+    dataManager.filteredData = dataManager.data.filter(d => {
+        return (selectedZone === 'all' || d.Zone === selectedZone) &&
+               (selectedSchoolType === 'all' || d['Public / Privé'] === selectedSchoolType) &&
+               (selectedGender === 'all' || d.Sexe === selectedGender);
+    });
+
+    // Recreate all visualizations with the new filtered data
+    createVisualizations();
+}
+
+function resetFilters() {
+    // Reset all filter selections
+    d3.select('#zoneFilter').property('value', 'all');
+    d3.select('#schoolTypeFilter').property('value', 'all');
+    d3.select('#genderFilter').property('value', 'all');
+
+    // Reset filtered data to original data
+    dataManager.filteredData = [...dataManager.data];
+
+    // Recreate all visualizations with the original data
+    createVisualizations();
 }
 
 function createVisualizations() {
@@ -89,36 +209,39 @@ function clearVisualizations() {
 // School Type Performance Chart
 function createSchoolTypeChart() {
     const container = d3.select('#schoolTypeChart');
-    const width = container.node().getBoundingClientRect().width - margin.left - margin.right;
-    const height = 400 - margin.top - margin.bottom;
+    const width = container.node().getBoundingClientRect().width - config.margin.left - config.margin.right;
+    const height = 400 - config.margin.top - config.margin.bottom;
+
+    // Clear existing content
+    container.html('');
 
     const svg = container.append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
+        .attr('width', width + config.margin.left + config.margin.right)
+        .attr('height', height + config.margin.top + config.margin.bottom)
         .append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
+        .attr('transform', `translate(${config.margin.left},${config.margin.top})`);
 
-    const schoolTypes = [...new Set(filteredData.map(d => d['Public / Privé']))];
-    const scoreTypes = ['Score primaire', 'Score collégial', 'Score actuel'];
-
+    // Process data
+    const schoolTypes = dataManager.getUniqueValues('Public / Privé');
     const data = schoolTypes.map(type => {
-        const schoolData = filteredData.filter(d => d['Public / Privé'] === type);
+        const schoolData = dataManager.filteredData.filter(d => d['Public / Privé'] === type);
         return {
             type: type,
-            scores: scoreTypes.map(score => ({
+            scores: config.scoreTypes.map(score => ({
                 score: score,
-                value: d3.mean(schoolData, d => d[score])
+                value: d3.mean(schoolData, d => d[score]) || 0
             }))
         };
     });
 
+    // Create scales
     const x0 = d3.scaleBand()
         .domain(schoolTypes)
-        .range([0, width - 120]) // Adjust width to accommodate legend
-        .padding(0.1);
+        .range([0, width])
+        .padding(0.2);
 
     const x1 = d3.scaleBand()
-        .domain(scoreTypes)
+        .domain(config.scoreTypes)
         .range([0, x0.bandwidth()])
         .padding(0.05);
 
@@ -126,59 +249,15 @@ function createSchoolTypeChart() {
         .domain([0, 10])
         .range([height, 0]);
 
-    const color = d3.scaleOrdinal()
-        .domain(scoreTypes)
-        .range(['#4e79a7', '#f28e2c', '#e15759']);
-
-    schoolTypes.forEach(type => {
-        const typeGroup = svg.append('g')
-            .attr('transform', `translate(${x0(type)},0)`);
-
-        typeGroup.selectAll('rect')
-            .data(data.find(d => d.type === type).scores)
-            .enter()
-            .append('rect')
-            .attr('x', d => x1(d.score))
-            .attr('y', d => y(d.value))
-            .attr('width', x1.bandwidth())
-            .attr('height', d => height - y(d.value))
-            .attr('fill', d => color(d.score))
-            .on('mouseover', function(event, d) {
-                d3.select(this).attr('opacity', 0.8);
-                showTooltip(event, `${type} - ${d.score}: ${d.value.toFixed(2)}`);
-            })
-            .on('mouseout', function() {
-                d3.select(this).attr('opacity', 1);
-                hideTooltip();
-            });
-    });
-
     // Add axes
     svg.append('g')
         .attr('transform', `translate(0,${height})`)
-        .call(d3.axisBottom(x0));
+        .call(d3.axisBottom(x0))
+        .selectAll('text')
+        .style('text-anchor', 'middle');
 
     svg.append('g')
         .call(d3.axisLeft(y));
-
-    // Add legend to the right side
-    const legend = svg.append('g')
-        .attr('transform', `translate(${width - 100}, 10)`);
-
-    scoreTypes.forEach((score, i) => {
-        const legendGroup = legend.append('g')
-            .attr('transform', `translate(0, ${i * 25})`);
-
-        legendGroup.append('rect')
-            .attr('width', 15)
-            .attr('height', 15)
-            .attr('fill', color(score));
-
-        legendGroup.append('text')
-            .attr('x', 25)
-            .attr('y', 12)
-            .text(score);
-    });
 
     // Add y-axis label
     svg.append('text')
@@ -187,41 +266,111 @@ function createSchoolTypeChart() {
         .attr('x', -height / 2)
         .attr('text-anchor', 'middle')
         .text('Score');
+
+    // Create color scale
+    const colorScale = d3.scaleOrdinal()
+        .domain(config.scoreTypes)
+        .range(config.scoreTypes.map(score => config.colors.scores[score]));
+
+    // Create and populate the groups
+    const typeGroups = svg.selectAll('.type-group')
+        .data(data)
+        .enter()
+        .append('g')
+        .attr('class', 'type-group')
+        .attr('transform', d => `translate(${x0(d.type)},0)`);
+
+    // Create bars with hover effects
+    typeGroups.selectAll('.score-bar')
+        .data(d => d.scores)
+        .enter()
+        .append('rect')
+        .attr('class', 'score-bar')
+        .attr('x', d => x1(d.score))
+        .attr('y', d => y(d.value))
+        .attr('width', x1.bandwidth())
+        .attr('height', d => height - y(d.value))
+        .attr('fill', d => colorScale(d.score))
+        .style('cursor', 'pointer')
+        .on('mouseover', function(event, d) {
+            const parentData = d3.select(this.parentNode).datum();
+            d3.select(this)
+                .attr('opacity', 0.8)
+                .attr('stroke', '#000')
+                .attr('stroke-width', 1);
+            showTooltip(event, `${parentData.type}<br>${d.score}: ${d.value.toFixed(2)}`);
+        })
+        .on('mouseout', function() {
+            d3.select(this)
+                .attr('opacity', 1)
+                .attr('stroke', 'none');
+            hideTooltip();
+        });
+
+    // Add legend
+    const legend = svg.append('g')
+        .attr('transform', `translate(${width - 120}, 0)`);
+
+    config.scoreTypes.forEach((score, i) => {
+        const legendGroup = legend.append('g')
+            .attr('transform', `translate(0, ${i * 20})`);
+
+        legendGroup.append('rect')
+            .attr('width', 15)
+            .attr('height', 15)
+            .attr('fill', colorScale(score));
+
+        legendGroup.append('text')
+            .attr('x', 20)
+            .attr('y', 12)
+            .text(score);
+    });
+
+    // Add title
+    svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', -10)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '16px')
+        .text('School Type Performance Comparison');
 }
 
 // Zone Performance Chart
 function createZoneChart() {
     const container = d3.select('#zoneChart');
-    const width = container.node().getBoundingClientRect().width - margin.left - margin.right;
-    const height = 400 - margin.top - margin.bottom;
+    const width = container.node().getBoundingClientRect().width - config.margin.left - config.margin.right;
+    const height = 400 - config.margin.top - config.margin.bottom;
+
+    // Clear existing content
+    container.html('');
 
     const svg = container.append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
+        .attr('width', width + config.margin.left + config.margin.right)
+        .attr('height', height + config.margin.top + config.margin.bottom)
         .append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
+        .attr('transform', `translate(${config.margin.left},${config.margin.top})`);
 
-    const zones = [...new Set(filteredData.map(d => d.Zone))];
-    const scoreTypes = ['Score primaire', 'Score collégial', 'Score actuel'];
-
+    // Process data
+    const zones = dataManager.getUniqueValues('Zone');
     const data = zones.map(zone => {
-        const zoneData = filteredData.filter(d => d.Zone === zone);
+        const zoneData = dataManager.filteredData.filter(d => d.Zone === zone);
         return {
             zone: zone,
-            scores: scoreTypes.map(score => ({
+            scores: config.scoreTypes.map(score => ({
                 score: score,
-                value: d3.mean(zoneData, d => d[score])
+                value: d3.mean(zoneData, d => d[score]) || 0
             }))
         };
     });
 
+    // Create scales
     const x0 = d3.scaleBand()
         .domain(zones)
         .range([0, width])
-        .padding(0.1);
+        .padding(0.2);
 
     const x1 = d3.scaleBand()
-        .domain(scoreTypes)
+        .domain(config.scoreTypes)
         .range([0, x0.bandwidth()])
         .padding(0.05);
 
@@ -229,33 +378,7 @@ function createZoneChart() {
         .domain([0, 10])
         .range([height, 0]);
 
-    const color = d3.scaleOrdinal()
-        .domain(scoreTypes)
-        .range(['#4e79a7', '#f28e2c', '#e15759']);
-
-    zones.forEach(zone => {
-        const zoneGroup = svg.append('g')
-            .attr('transform', `translate(${x0(zone)},0)`);
-
-        zoneGroup.selectAll('rect')
-            .data(data.find(d => d.zone === zone).scores)
-            .enter()
-            .append('rect')
-            .attr('x', d => x1(d.score))
-            .attr('y', d => y(d.value))
-            .attr('width', x1.bandwidth())
-            .attr('height', d => height - y(d.value))
-            .attr('fill', d => color(d.score))
-            .on('mouseover', function(event, d) {
-                d3.select(this).attr('opacity', 0.8);
-                showTooltip(event, `${zone} - ${d.score}: ${d.value.toFixed(2)}`);
-            })
-            .on('mouseout', function() {
-                d3.select(this).attr('opacity', 1);
-                hideTooltip();
-            });
-    });
-
+    // Add axes
     svg.append('g')
         .attr('transform', `translate(0,${height})`)
         .call(d3.axisBottom(x0))
@@ -266,53 +389,107 @@ function createZoneChart() {
     svg.append('g')
         .call(d3.axisLeft(y));
 
-    const legend = svg.append('g')
-        .attr('transform', `translate(${width - 100}, 0)`);
+    // Add y-axis label
+    svg.append('text')
+        .attr('transform', 'rotate(-90)')
+        .attr('y', -50)
+        .attr('x', -height / 2)
+        .attr('text-anchor', 'middle')
+        .text('Score');
 
-    scoreTypes.forEach((score, i) => {
-        const legendRow = legend.append('g')
+    // Create color scale
+    const colorScale = d3.scaleOrdinal()
+        .domain(config.scoreTypes)
+        .range(config.scoreTypes.map(score => config.colors.scores[score]));
+
+    // Create and populate the groups
+    const zoneGroups = svg.selectAll('.zone-group')
+        .data(data)
+        .enter()
+        .append('g')
+        .attr('class', 'zone-group')
+        .attr('transform', d => `translate(${x0(d.zone)},0)`);
+
+    // Create bars with hover effects
+    zoneGroups.selectAll('.score-bar')
+        .data(d => d.scores)
+        .enter()
+        .append('rect')
+        .attr('class', 'score-bar')
+        .attr('x', d => x1(d.score))
+        .attr('y', d => y(d.value))
+        .attr('width', x1.bandwidth())
+        .attr('height', d => height - y(d.value))
+        .attr('fill', d => colorScale(d.score))
+        .style('cursor', 'pointer')
+        .on('mouseover', function(event, d) {
+            const parentData = d3.select(this.parentNode).datum();
+            d3.select(this)
+                .attr('opacity', 0.8)
+                .attr('stroke', '#000')
+                .attr('stroke-width', 1);
+            showTooltip(event, `${parentData.zone}<br>${d.score}: ${d.value.toFixed(2)}`);
+        })
+        .on('mouseout', function() {
+            d3.select(this)
+                .attr('opacity', 1)
+                .attr('stroke', 'none');
+            hideTooltip();
+        });
+
+    // Add legend
+    const legend = svg.append('g')
+        .attr('transform', `translate(${width - 120}, 0)`);
+
+    config.scoreTypes.forEach((score, i) => {
+        const legendGroup = legend.append('g')
             .attr('transform', `translate(0, ${i * 20})`);
 
-        legendRow.append('rect')
+        legendGroup.append('rect')
             .attr('width', 15)
             .attr('height', 15)
-            .attr('fill', color(score));
+            .attr('fill', colorScale(score));
 
-        legendRow.append('text')
+        legendGroup.append('text')
             .attr('x', 20)
             .attr('y', 12)
             .text(score);
     });
+
+    // Add title
+    svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', -10)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '16px')
+        .text('Zone Performance Analysis');
 }
 
 // Create correlation heatmap
 function createCorrelationHeatmap() {
     const container = d3.select('#correlationHeatmap');
-    const containerWidth = container.node().getBoundingClientRect().width;
-    const containerHeight = container.node().getBoundingClientRect().height || 500;
     
-    // Adjust margins for labels
-    const heatmapMargin = {
-        top: 60,
-        right: 100,
-        bottom: 100,
-        left: 100
+    // Increase margins for better label visibility
+    const correlationMargins = {
+        top: config.margin.top + 20,
+        right: config.margin.right + 40,
+        bottom: config.margin.bottom + 80, // More space for rotated labels
+        left: config.margin.left + 80 // More space for long labels
     };
-    
-    const width = containerWidth - heatmapMargin.left - heatmapMargin.right;
-    const height = Math.min(containerHeight - heatmapMargin.top - heatmapMargin.bottom, width);
+
+    const width = container.node().getBoundingClientRect().width - correlationMargins.left - correlationMargins.right;
+    const height = 400 - correlationMargins.top - correlationMargins.bottom;
 
     // Clear existing content
     container.html('');
 
     const svg = container.append('svg')
-        .attr('width', width + heatmapMargin.left + heatmapMargin.right)
-        .attr('height', height + heatmapMargin.top + heatmapMargin.bottom)
-        .attr('viewBox', `0 0 ${width + heatmapMargin.left + heatmapMargin.right} ${height + heatmapMargin.top + heatmapMargin.bottom}`)
-        .attr('preserveAspectRatio', 'xMidYMid meet')
+        .attr('width', width + correlationMargins.left + correlationMargins.right)
+        .attr('height', height + correlationMargins.top + correlationMargins.bottom)
         .append('g')
-        .attr('transform', `translate(${heatmapMargin.left},${heatmapMargin.top})`);
+        .attr('transform', `translate(${correlationMargins.left},${correlationMargins.top})`);
 
+    // Define metrics to correlate
     const metrics = [
         'Score primaire',
         'Score collégial',
@@ -322,122 +499,127 @@ function createCorrelationHeatmap() {
         'score en première langue'
     ];
 
-    // Calculate correlations
-    const correlationData = [];
-    metrics.forEach((metric1, i) => {
-        metrics.forEach((metric2, j) => {
-            const correlation = calculateCorrelation(
-                filteredData.map(d => d[metric1]),
-                filteredData.map(d => d[metric2])
-            );
-            correlationData.push({
-                metric1: metric1,
-                metric2: metric2,
-                correlation: correlation
-            });
-        });
-    });
+    // Calculate correlation matrix
+    const correlationMatrix = metrics.map(metric1 => 
+        metrics.map(metric2 => calculateCorrelation(
+            dataManager.filteredData.map(d => d[metric1]),
+            dataManager.filteredData.map(d => d[metric2])
+        ))
+    );
 
-    // Create scales
-    const cellSize = Math.min(width, height) / metrics.length;
-    
+    // Create scales with adjusted padding
     const x = d3.scaleBand()
+        .range([0, width])
         .domain(metrics)
-        .range([0, metrics.length * cellSize])
         .padding(0.05);
 
     const y = d3.scaleBand()
+        .range([height, 0])
         .domain(metrics)
-        .range([0, metrics.length * cellSize])
         .padding(0.05);
 
-    const color = d3.scaleSequential()
-        .domain([-1, 1])
-        .interpolator(d3.interpolateRdBu);
+    // Color scale for correlation values
+    const colorScale = d3.scaleSequential()
+        .domain([1, -1])
+        .interpolator(d3.interpolateRgb(
+            config.colors.correlation.positive,
+            config.colors.correlation.negative
+        ));
 
     // Create cells
-    const cells = svg.selectAll('rect')
-        .data(correlationData)
+    const cells = svg.selectAll('g')
+        .data(metrics.flatMap((row, i) => 
+            metrics.map((col, j) => ({
+                row: row,
+                col: col,
+                value: correlationMatrix[i][j]
+            }))
+        ))
         .enter()
-        .append('rect')
-        .attr('x', d => x(d.metric1))
-        .attr('y', d => y(d.metric2))
+        .append('g');
+
+    // Add rectangles
+    cells.append('rect')
+        .attr('x', d => x(d.col))
+        .attr('y', d => y(d.row))
         .attr('width', x.bandwidth())
         .attr('height', y.bandwidth())
-        .attr('fill', d => color(d.correlation))
-        .attr('stroke', '#fff')
+        .attr('fill', d => colorScale(d.value))
+        .attr('stroke', 'white')
         .attr('stroke-width', 1)
+        .style('cursor', 'pointer')
         .on('mouseover', function(event, d) {
             d3.select(this)
-                .attr('stroke', '#000')
-                .attr('stroke-width', 2);
-            showTooltip(event, `${d.metric1} vs ${d.metric2}: ${d.correlation.toFixed(3)}`);
+                .attr('stroke-width', 2)
+                .attr('stroke', '#000');
+            showTooltip(event, `${d.row} vs ${d.col}: ${d.value.toFixed(2)}`);
         })
         .on('mouseout', function() {
             d3.select(this)
-                .attr('stroke', '#fff')
-                .attr('stroke-width', 1);
+                .attr('stroke-width', 1)
+                .attr('stroke', 'white');
             hideTooltip();
         });
 
-    // Add labels
-    const xLabels = svg.append('g')
-        .selectAll('text')
-        .data(metrics)
-        .enter()
-        .append('text')
-        .attr('x', d => x(d) + x.bandwidth() / 2)
-        .attr('y', -10)
-        .attr('transform', d => `rotate(-45, ${x(d) + x.bandwidth() / 2}, -10)`)
-        .attr('text-anchor', 'end')
-        .style('font-size', '12px')
-        .text(d => d);
-
-    const yLabels = svg.append('g')
-        .selectAll('text')
-        .data(metrics)
-        .enter()
-        .append('text')
-        .attr('x', -10)
-        .attr('y', d => y(d) + y.bandwidth() / 2)
-        .attr('text-anchor', 'end')
+    // Add correlation values
+    cells.append('text')
+        .attr('x', d => x(d.col) + x.bandwidth() / 2)
+        .attr('y', d => y(d.row) + y.bandwidth() / 2)
+        .attr('text-anchor', 'middle')
         .attr('dominant-baseline', 'middle')
-        .style('font-size', '12px')
-        .text(d => d);
+        .style('font-size', '10px')
+        .style('fill', d => Math.abs(d.value) > 0.5 ? 'white' : 'black')
+        .text(d => d.value.toFixed(2));
 
-    // Add color scale legend
-    const legendWidth = 20;
-    const legendHeight = height * 0.7;
+    // Add X axis with rotated labels
+    svg.append('g')
+        .attr('transform', `translate(0,${height})`)
+        .call(d3.axisBottom(x))
+        .selectAll('text')
+        .attr('transform', 'rotate(-45)')
+        .style('text-anchor', 'end')
+        .attr('dx', '-0.5em')
+        .attr('dy', '0.5em');
+
+    // Add Y axis with adjusted labels
+    svg.append('g')
+        .call(d3.axisLeft(y))
+        .selectAll('text')
+        .attr('dx', '-0.5em');
+
+    // Add title
+    svg.append('text')
+        .attr('x', width / 2)
+        .attr('y', -correlationMargins.top / 2)
+        .attr('text-anchor', 'middle')
+        .style('font-size', '16px')
+        .text('Score Correlations');
+
+    // Add legend with adjusted position
+    const legendWidth = Math.min(200, width * 0.4);
+    const legendHeight = 20;
     
     const legendScale = d3.scaleLinear()
         .domain([-1, 1])
-        .range([legendHeight, 0]);
+        .range([0, legendWidth]);
 
-    const legendAxis = d3.axisRight()
-        .scale(legendScale)
+    const legendAxis = d3.axisBottom(legendScale)
         .ticks(5)
         .tickFormat(d3.format('.1f'));
 
-    const legend = svg.append('g')
-        .attr('transform', `translate(${width + 40}, ${(height - legendHeight) / 2})`);
+    const defs = svg.append('defs');
+    const linearGradient = defs.append('linearGradient')
+        .attr('id', 'correlation-gradient');
 
-    const legendGradient = legend.append('defs')
-        .append('linearGradient')
-        .attr('id', 'correlation-gradient')
-        .attr('x1', '0%')
-        .attr('y1', '100%')
-        .attr('x2', '0%')
-        .attr('y2', '0%');
-
-    legendGradient.selectAll('stop')
-        .data(color.ticks(10).map((t, i, n) => ({ 
-            offset: `${100 * i / n.length}%`,
-            color: color(t) 
-        })))
+    linearGradient.selectAll('stop')
+        .data(d3.range(-1, 1.1, 0.1))
         .enter()
         .append('stop')
-        .attr('offset', d => d.offset)
-        .attr('stop-color', d => d.color);
+        .attr('offset', d => ((d + 1) / 2 * 100) + '%')
+        .attr('stop-color', d => colorScale(d));
+
+    const legend = svg.append('g')
+        .attr('transform', `translate(${(width - legendWidth) / 2},${height + correlationMargins.bottom - 40})`);
 
     legend.append('rect')
         .attr('width', legendWidth)
@@ -445,36 +627,34 @@ function createCorrelationHeatmap() {
         .style('fill', 'url(#correlation-gradient)');
 
     legend.append('g')
-        .attr('transform', `translate(${legendWidth}, 0)`)
+        .attr('transform', `translate(0,${legendHeight})`)
         .call(legendAxis);
 
     legend.append('text')
-        .attr('transform', `rotate(-90)`)
-        .attr('x', -legendHeight / 2)
-        .attr('y', -30)
+        .attr('x', legendWidth / 2)
+        .attr('y', legendHeight + 35)
         .attr('text-anchor', 'middle')
-        .style('font-size', '12px')
-        .text('Correlation');
+        .text('Correlation Coefficient');
 }
 
 // Resource Access Chart (Stacked Bar)
 function createResourceAccessChart() {
     const container = d3.select('#resourceAccessChart');
-    const width = container.node().getBoundingClientRect().width - margin.left - margin.right;
-    const height = 400 - margin.top - margin.bottom;
+    const width = container.node().getBoundingClientRect().width - config.margin.left - config.margin.right;
+    const height = 400 - config.margin.top - config.margin.bottom;
 
     const svg = container.append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
+        .attr('width', width + config.margin.left + config.margin.right)
+        .attr('height', height + config.margin.top + config.margin.bottom)
         .append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
+        .attr('transform', `translate(${config.margin.left},${config.margin.top})`);
 
     const resources = ['Electricité', 'Eau', 'pc', 'Livres'];
-    const zones = [...new Set(filteredData.map(d => d.Zone))];
+    const zones = dataManager.getUniqueValues('Zone');
 
     // Process data for stacked bars with softmax normalization
     const stackedData = zones.map(zone => {
-        const zoneData = filteredData.filter(d => d.Zone === zone);
+        const zoneData = dataManager.filteredData.filter(d => d.Zone === zone);
         const resourceValues = resources.map(resource => 
             d3.mean(zoneData, d => d[resource] === 'oui' ? 1 : 0)
         );
@@ -510,8 +690,8 @@ function createResourceAccessChart() {
         .range([height, 0]);
 
     const color = d3.scaleOrdinal()
-        .domain(resources)
-        .range(['#98abc5', '#8a89a6', '#7b6888', '#6b486b']);
+        .domain(Object.keys(config.colors.resources))
+        .range(Object.values(config.colors.resources));
 
     // Create stacked bars
     const layers = svg.append('g')
@@ -583,61 +763,66 @@ function createResourceAccessChart() {
 // Performance Radar Chart
 function createPerformanceRadar() {
     const container = d3.select('#performanceRadar');
-    const containerWidth = container.node().getBoundingClientRect().width;
-    const containerHeight = container.node().getBoundingClientRect().height || 500;
-    const width = containerWidth - margin.left - margin.right;
-    const height = Math.min(containerHeight - margin.top - margin.bottom, width);
+    const width = container.node().getBoundingClientRect().width - config.margin.left - config.margin.right;
+    const height = Math.min(400 - config.margin.top - config.margin.bottom, width);
     const radius = Math.min(width, height) / 2;
 
     // Clear existing content
     container.html('');
 
     const svg = container.append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
-        .attr('viewBox', `0 0 ${width + margin.left + margin.right} ${height + margin.top + margin.bottom}`)
-        .attr('preserveAspectRatio', 'xMidYMid meet')
+        .attr('width', width + config.margin.left + config.margin.right)
+        .attr('height', height + config.margin.top + config.margin.bottom)
         .append('g')
-        .attr('transform', `translate(${width/2 + margin.left},${height/2 + margin.top})`);
+        .attr('transform', `translate(${width/2 + config.margin.left},${height/2 + config.margin.top})`);
 
+    // Define metrics and categories
+    const metrics = [
+        'Score primaire',
+        'Score collégial',
+        'Score actuel',
+        'score en mathématiques',
+        'score en langue arabe',
+        'score en première langue'
+    ];
     const categories = ['Public', 'Privé'];
-    const metrics = ['Score primaire', 'Score collégial', 'Score actuel', 
-                    'score en mathématiques', 'score en langue arabe', 'score en première langue'];
 
-    const angleScale = d3.scalePoint()
-        .domain(metrics)
-        .range([0, 2 * Math.PI]);
+    // Calculate angles for each metric
+    const angleStep = (Math.PI * 2) / metrics.length;
+    const angles = metrics.map((_, i) => i * angleStep);
 
-    const radiusScale = d3.scaleLinear()
+    // Create scales
+    const rScale = d3.scaleLinear()
         .domain([0, 10])
         .range([0, radius]);
 
-    // Create radar grid with labels
-    const levels = [2, 4, 6, 8, 10];
-    levels.forEach(level => {
+    // Draw the circular grid
+    const gridLevels = [2, 4, 6, 8, 10];
+    gridLevels.forEach(level => {
+        const gridRadius = rScale(level);
         svg.append('circle')
             .attr('cx', 0)
             .attr('cy', 0)
-            .attr('r', radiusScale(level))
+            .attr('r', gridRadius)
             .attr('fill', 'none')
-            .attr('stroke', '#ddd')
-            .attr('stroke-width', 0.5);
+            .attr('stroke', config.colors.grid)
+            .attr('stroke-dasharray', '4,4');
 
-        // Add level labels
+        // Add grid level labels
         svg.append('text')
             .attr('x', 5)
-            .attr('y', -radiusScale(level))
+            .attr('y', -gridRadius)
             .attr('fill', '#666')
-            .attr('font-size', '10px')
+            .style('font-size', '10px')
             .text(level.toString());
     });
 
-    // Add axis lines and labels
-    metrics.forEach(metric => {
-        const angle = angleScale(metric) - Math.PI/2;
+    // Draw axis lines and labels
+    metrics.forEach((metric, i) => {
+        const angle = angles[i];
         const lineEnd = {
-            x: radius * Math.cos(angle),
-            y: radius * Math.sin(angle)
+            x: radius * Math.cos(angle - Math.PI/2),
+            y: radius * Math.sin(angle - Math.PI/2)
         };
 
         // Draw axis line
@@ -646,109 +831,134 @@ function createPerformanceRadar() {
             .attr('y1', 0)
             .attr('x2', lineEnd.x)
             .attr('y2', lineEnd.y)
-            .attr('stroke', '#ddd')
-            .attr('stroke-width', 0.5);
+            .attr('stroke', config.colors.grid);
 
-        // Add axis label with better positioning
-        const labelRadius = radius + 20;
-        const labelAngle = angle;
-        const labelPos = {
-            x: labelRadius * Math.cos(labelAngle),
-            y: labelRadius * Math.sin(labelAngle)
+        // Add metric labels
+        const labelDistance = radius + 20;
+        const labelPosition = {
+            x: labelDistance * Math.cos(angle - Math.PI/2),
+            y: labelDistance * Math.sin(angle - Math.PI/2)
         };
 
         svg.append('text')
-            .attr('x', labelPos.x)
-            .attr('y', labelPos.y)
-            .attr('text-anchor', Math.abs(labelAngle) < Math.PI/2 ? 'start' : 'end')
+            .attr('x', labelPosition.x)
+            .attr('y', labelPosition.y)
+            .attr('text-anchor', 'middle')
             .attr('dominant-baseline', 'middle')
-            .attr('transform', `rotate(${angle * 180/Math.PI + (Math.abs(labelAngle) < Math.PI/2 ? 0 : 180)} ${labelPos.x} ${labelPos.y})`)
-            .text(metric)
-            .style('font-size', '12px');
+            .style('font-size', '12px')
+            .text(metric);
     });
 
-    // Calculate data points
+    // Calculate data points for each category
     const categoryData = categories.map(category => {
-        const categoryRecords = filteredData.filter(d => d['Public / Privé'] === category);
-        return {
-            category: category,
-            scores: metrics.map(metric => ({
-                metric: metric,
-                value: d3.mean(categoryRecords, d => d[metric])
-            }))
-        };
+        const values = metrics.map(metric => {
+            const categoryRecords = dataManager.filteredData.filter(d => d['Public / Privé'] === category);
+            return d3.mean(categoryRecords, d => d[metric]) || 0;
+        });
+        return { category, values };
     });
 
     // Create color scale
     const colorScale = d3.scaleOrdinal()
-        .domain(categories)
-        .range(['#4e79a7', '#f28e2c']);
+        .domain(Object.keys(config.colors.schoolTypes))
+        .range(Object.values(config.colors.schoolTypes));
 
-    // Draw radar paths and points
-    categoryData.forEach(catData => {
-        const points = catData.scores.map(score => {
-            const angle = angleScale(score.metric) - Math.PI/2;
-            const radius = radiusScale(score.value);
+    // Function to create path data
+    function createPathData(values) {
+        return values.map((value, i) => {
+            const angle = angles[i];
+            const r = rScale(value);
             return {
-                x: radius * Math.cos(angle),
-                y: radius * Math.sin(angle),
-                metric: score.metric,
-                value: score.value
+                x: r * Math.cos(angle - Math.PI/2),
+                y: r * Math.sin(angle - Math.PI/2),
+                value,
+                metric: metrics[i],
+                angle
             };
         });
+    }
 
-        // Create path
+    // Draw radar paths for each category
+    categoryData.forEach(({ category, values }) => {
+        const pathData = createPathData(values);
+        const color = colorScale(category);
+
+        // Create group for this category
+        const categoryGroup = svg.append('g')
+            .attr('class', `radar-group-${category}`);
+
+        // Draw filled path
         const radarLine = d3.lineRadial()
-            .radius(d => radiusScale(d.value))
-            .angle((d, i) => angleScale(d.metric));
+            .angle(d => d.angle)
+            .radius(d => rScale(d.value))
+            .curve(d3.curveLinearClosed);
 
-        const pathGroup = svg.append('g')
-            .attr('class', `radar-group-${catData.category}`);
-
-        // Draw the radar path
-        pathGroup.append('path')
-            .datum(catData.scores)
+        categoryGroup.append('path')
+            .datum(values.map((value, i) => [angles[i], value]))
             .attr('d', radarLine)
-            .attr('fill', colorScale(catData.category))
+            .attr('fill', color)
             .attr('fill-opacity', 0.2)
-            .attr('stroke', colorScale(catData.category))
+            .attr('stroke', color)
             .attr('stroke-width', 2);
 
-        // Add interactive points
-        points.forEach(point => {
-            pathGroup.append('circle')
-                .attr('cx', point.x)
-                .attr('cy', point.y)
-                .attr('r', 5)
-                .attr('fill', colorScale(catData.category))
-                .attr('stroke', '#fff')
-                .attr('stroke-width', 1)
+        // Draw points and edges with hover effects
+        pathData.forEach((point, i) => {
+            const nextPoint = pathData[(i + 1) % pathData.length];
+
+            // Draw edge with hover effect
+            categoryGroup.append('line')
+                .attr('x1', point.x)
+                .attr('y1', point.y)
+                .attr('x2', nextPoint.x)
+                .attr('y2', nextPoint.y)
+                .attr('stroke', color)
+                .attr('stroke-width', 2)
+                .attr('class', 'radar-edge')
+                .style('cursor', 'pointer')
                 .on('mouseover', function(event) {
                     d3.select(this)
-                        .transition()
-                        .duration(200)
-                        .attr('r', 8);
-                    showTooltip(event, `${catData.category} - ${point.metric}: ${point.value.toFixed(2)}`);
+                        .attr('stroke-width', 4);
+                    showTooltip(event, 
+                        `${category}:<br>` +
+                        `${point.metric}: ${point.value.toFixed(2)}<br>` +
+                        `${nextPoint.metric}: ${nextPoint.value.toFixed(2)}`
+                    );
                 })
                 .on('mouseout', function() {
                     d3.select(this)
-                        .transition()
-                        .duration(200)
-                        .attr('r', 5);
+                        .attr('stroke-width', 2);
+                    hideTooltip();
+                });
+
+            // Draw points
+            categoryGroup.append('circle')
+                .attr('cx', point.x)
+                .attr('cy', point.y)
+                .attr('r', 4)
+                .attr('fill', color)
+                .attr('stroke', '#fff')
+                .attr('stroke-width', 1)
+                .style('cursor', 'pointer')
+                .on('mouseover', function(event) {
+                    d3.select(this)
+                        .attr('r', 6);
+                    showTooltip(event, `${category} - ${point.metric}: ${point.value.toFixed(2)}`);
+                })
+                .on('mouseout', function() {
+                    d3.select(this)
+                        .attr('r', 4);
                     hideTooltip();
                 });
         });
     });
 
     // Add legend
-    const legendWidth = 120;
     const legend = svg.append('g')
-        .attr('class', 'legend')
-        .attr('transform', `translate(${radius + 20}, ${-radius + 20})`);
+        .attr('transform', `translate(${-radius},${-radius})`);
 
     categories.forEach((category, i) => {
         const legendGroup = legend.append('g')
-            .attr('transform', `translate(0, ${i * 25})`);
+            .attr('transform', `translate(0,${i * 20})`);
 
         legendGroup.append('rect')
             .attr('width', 15)
@@ -756,41 +966,40 @@ function createPerformanceRadar() {
             .attr('fill', colorScale(category));
 
         legendGroup.append('text')
-            .attr('x', 25)
+            .attr('x', 20)
             .attr('y', 12)
-            .text(category)
-            .style('font-size', '12px');
+            .text(category);
     });
 }
 
 // Sankey Diagram
 function createSankeyDiagram() {
     const container = d3.select('#sankeyDiagram');
-    const width = container.node().getBoundingClientRect().width - margin.left - margin.right;
-    const height = 400 - margin.top - margin.bottom;
+    const width = container.node().getBoundingClientRect().width - config.margin.left - config.margin.right;
+    const height = 400 - config.margin.top - config.margin.bottom;
 
     const svg = container.append('svg')
-        .attr('width', width + margin.left + margin.right)
-        .attr('height', height + margin.top + margin.bottom)
+        .attr('width', width + config.margin.left + config.margin.right)
+        .attr('height', height + config.margin.top + config.margin.bottom)
         .append('g')
-        .attr('transform', `translate(${margin.left},${margin.top})`);
+        .attr('transform', `translate(${config.margin.left},${config.margin.top})`);
 
     // Prepare data for Sankey diagram
     const nodes = [];
     const links = [];
 
     // Add school types
-    const schoolTypes = [...new Set(filteredData.map(d => d['Public / Privé']))];
+    const schoolTypes = dataManager.getUniqueValues('Public / Privé');
     schoolTypes.forEach(type => nodes.push({ name: type }));
 
     // Add zones
-    const zones = [...new Set(filteredData.map(d => d.Zone))];
+    const zones = dataManager.getUniqueValues('Zone');
     zones.forEach(zone => nodes.push({ name: zone }));
 
     // Create links between school types and zones
     schoolTypes.forEach(type => {
         zones.forEach(zone => {
-            const value = filteredData.filter(d => 
+            const value = dataManager.filteredData.filter(d => 
                 d['Public / Privé'] === type && d.Zone === zone
             ).length;
             if (value > 0) {
@@ -860,27 +1069,6 @@ function createSankeyDiagram() {
         .text(d => d.name);
 }
 
-// Filter handling
-function updateVisualizations() {
-    const selectedZone = d3.select('#zoneFilter').property('value');
-    const selectedSchoolType = d3.select('#schoolTypeFilter').property('value');
-    const selectedGender = d3.select('#genderFilter').property('value');
-
-    filteredData = data.filter(d => {
-        return (selectedZone === 'all' || d.Zone === selectedZone) &&
-               (selectedSchoolType === 'all' || d['Public / Privé'] === selectedSchoolType) &&
-               (selectedGender === 'all' || d.Sexe === selectedGender);
-    });
-
-    createVisualizations();
-}
-
-function resetFilters() {
-    d3.selectAll('select').property('value', 'all');
-    filteredData = [...data];
-    createVisualizations();
-}
-
 // Tooltip functions
 function showTooltip(event, text) {
     const tooltip = d3.select('body').append('div')
@@ -904,25 +1092,6 @@ function showTooltip(event, text) {
 
 function hideTooltip() {
     d3.selectAll('.tooltip').remove();
-}
-
-// Helper function to calculate correlation
-function calculateCorrelation(x, y) {
-    const n = x.length;
-    const mean_x = d3.mean(x);
-    const mean_y = d3.mean(y);
-    const std_x = Math.sqrt(d3.sum(x.map(xi => Math.pow(xi - mean_x, 2))) / n);
-    const std_y = Math.sqrt(d3.sum(y.map(yi => Math.pow(yi - mean_y, 2))) / n);
-    const covariance = d3.sum(x.map((xi, i) => (xi - mean_x) * (y[i] - mean_y))) / n;
-    return covariance / (std_x * std_y);
-}
-
-// Helper function for softmax normalization
-function softmax(arr) {
-    const maxVal = Math.max(...arr);
-    const expArr = arr.map(x => Math.exp(x - maxVal));
-    const sumExp = expArr.reduce((acc, val) => acc + val, 0);
-    return expArr.map(x => x / sumExp);
 }
 
 // Initialize dashboard on load
